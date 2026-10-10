@@ -1,11 +1,9 @@
 import re
 import unicodedata
-from collections import defaultdict
-from typing import Any, AsyncIterator
+from typing import Any
 
-from scrapy import Request, Selector, Spider
+from scrapy import Selector, Spider
 from scrapy.http import FormRequest, Response
-from scrapy.signals import spider_idle
 
 from locations.categories import Categories, apply_category
 from locations.hours import DAYS_RO, OpeningHours, day_range
@@ -38,14 +36,6 @@ class PostaRomanaROSpider(Spider):
     item_attributes = {"operator": "Poșta Română", "operator_wikidata": "Q283175"}
     allowed_domains = ["www.posta-romana.ro"]
     start_urls = ["https://www.posta-romana.ro/gaseste-oficiu-postal.html"]
-
-    async def start(self) -> AsyncIterator[Request]:
-        # Items are held back until every office has been fetched so that coordinates shared by several
-        # offices (the site falls back to geocoding a place name) can be recognised and dropped.
-        self.items = []
-        self.crawler.signals.connect(self.flush_items, signal=spider_idle)
-        for url in self.start_urls:
-            yield Request(url)
 
     def parse(self, response: Response, **kwargs: Any) -> Any:
         # The finder works county -> locality -> list of offices -> office details, each an AJAX POST
@@ -140,25 +130,7 @@ class PostaRomanaROSpider(Spider):
         if unit_type:
             item["extras"]["post_office:type"] = unit_type
         apply_category(Categories.POST_OFFICE, item)
-        self.items.append(item)
-
-    def flush_items(self) -> None:
-        self.crawler.signals.disconnect(self.flush_items, signal=spider_idle)
-        self.crawler.engine.crawl(Request(self.start_urls[0], callback=self.yield_items, dont_filter=True))
-
-    def yield_items(self, response: Response) -> Any:
-        # When the site has no position for an office it geocodes a place name, so unrelated offices end up
-        # on the same point (e.g. over a hundred village agencies in Timiș on central Timișoara). Drop any
-        # point shared by offices with different addresses; counters in one building keep theirs.
-        addresses = defaultdict(set)
-        for item in self.items:
-            if item.get("lat"):
-                addresses[(item["lat"], item["lon"])].add(item["addr_full"])
-        for item in self.items:
-            if item.get("lat") and len(addresses[(item["lat"], item["lon"])]) > 1:
-                item["lat"] = item["lon"] = None
-                self.crawler.stats.inc_value("atp/posta_romana_ro/shared_coordinates_dropped")
-            yield item
+        yield item
 
     @staticmethod
     def parse_hours(text: str) -> OpeningHours | None:
