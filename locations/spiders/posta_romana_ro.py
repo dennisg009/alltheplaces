@@ -165,6 +165,10 @@ class PostaRomanaROSpider(Spider):
                     return None
             for start, end in re.findall(r"(\d{1,2}[:.]\d{2})\s*-\s*(\d{1,2}[:.]\d{2})", times_text):
                 for day in days:
-                    oh.add_range(day, start.replace(".", ":"), end.replace(".", ":"))
-                    found = True
+                    try:
+                        oh.add_range(day, start.replace(".", ":"), end.replace(".", ":"))
+                        found = True
+                    except ValueError:
+                        # Skip invalid time pairs (e.g., 08:99-17:00)
+                        pass
         return oh if found else None
